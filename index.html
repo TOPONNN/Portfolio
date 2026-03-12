@@ -258,6 +258,8 @@
                     class="px-3 py-1 font-mono font-bold text-sm hover:bg-black hover:text-white transition-colors cursor-hover">/경험</a>
                 <a href="#projects"
                     class="px-3 py-1 font-mono font-bold text-sm hover:bg-black hover:text-white transition-colors cursor-hover">/프로젝트</a>
+                <a href="#live-tracker"
+                    class="px-3 py-1 font-mono font-bold text-sm hover:bg-black hover:text-white transition-colors cursor-hover">/접속자</a>
                 <a href="#contact"
                     class="px-3 py-1 font-mono font-bold text-sm bg-neo-yellow border border-black hover:bg-neo-pink transition-colors cursor-hover">연락
                     하기</a>
@@ -698,6 +700,66 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- REAL-TIME VISITOR TRACKER -->
+    <section id="live-tracker" class="py-16 px-4 max-w-7xl mx-auto">
+        <div class="bg-neo-black border-4 border-black shadow-hard-xl p-6 md:p-10 relative reveal">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 border-b-4 border-neo-green pb-4">
+                <div>
+                    <h2 class="text-4xl md:text-6xl font-black uppercase text-white tracking-tighter">
+                        LIVE<span class="text-neo-green">_VISITORS</span>
+                    </h2>
+                    <p class="font-mono text-sm text-gray-400 mt-1">실시간 접속 현황</p>
+                </div>
+                <div class="flex items-center gap-3 mt-4 md:mt-0">
+                    <div id="ws-status-dot" class="w-3 h-3 bg-red-500 rounded-full"></div>
+                    <span id="ws-status-text" class="font-mono text-sm text-red-400 font-bold uppercase">연결 중...</span>
+                    <div class="bg-neo-green text-black px-4 py-2 border-2 border-black font-mono font-black text-2xl shadow-hard-sm">
+                        <span id="visitor-count">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full font-mono text-sm">
+                    <thead>
+                        <tr class="border-b-2 border-white/20 text-left">
+                            <th class="py-3 px-3 text-neo-green text-xs uppercase tracking-wider">#</th>
+                            <th class="py-3 px-3 text-neo-green text-xs uppercase tracking-wider">IP</th>
+                            <th class="py-3 px-3 text-neo-green text-xs uppercase tracking-wider">위치</th>
+                            <th class="py-3 px-3 text-neo-green text-xs uppercase tracking-wider">브라우저 / OS</th>
+                            <th class="py-3 px-3 text-neo-green text-xs uppercase tracking-wider">장치</th>
+                            <th class="py-3 px-3 text-neo-green text-xs uppercase tracking-wider">ISP</th>
+                            <th class="py-3 px-3 text-neo-green text-xs uppercase tracking-wider">접속 시간</th>
+                        </tr>
+                    </thead>
+                    <tbody id="visitor-table-body">
+                        <tr class="border-b border-white/10">
+                            <td colspan="7" class="py-8 text-center text-gray-500">
+                                <div class="flex flex-col items-center gap-2">
+                                    <div class="w-8 h-8 border-2 border-neo-green border-t-transparent rounded-full animate-spin"></div>
+                                    <span>연결 대기 중...</span>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="my-info-panel" class="mt-6 bg-neo-green/10 border-2 border-neo-green p-4 hidden">
+                <div class="flex items-center gap-2 mb-2">
+                    <div class="w-2 h-2 bg-neo-green rounded-full animate-pulse"></div>
+                    <span class="font-mono text-neo-green text-xs font-bold uppercase">내 접속 정보</span>
+                </div>
+                <div id="my-info-content" class="font-mono text-white text-sm grid grid-cols-1 md:grid-cols-3 gap-2"></div>
+            </div>
+
+            <div class="mt-6 flex items-center justify-between text-gray-500 font-mono text-xs border-t border-white/10 pt-4">
+                <span>WebSocket // wss://topon.dev/ws</span>
+                <span id="server-time">--</span>
             </div>
         </div>
     </section>
@@ -1176,6 +1238,133 @@
                 contactSubmit.textContent = '메시지 전송';
             }
         });
+
+        // ==========================================
+        // REAL-TIME VISITOR TRACKER (WebSocket)
+        // ==========================================
+        (function() {
+            let ws = null;
+            let myId = null;
+            let reconnectTimer = null;
+            const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+
+            const statusDot = document.getElementById('ws-status-dot');
+            const statusText = document.getElementById('ws-status-text');
+            const visitorCount = document.getElementById('visitor-count');
+            const tableBody = document.getElementById('visitor-table-body');
+            const myInfoPanel = document.getElementById('my-info-panel');
+            const myInfoContent = document.getElementById('my-info-content');
+            const serverTimeEl = document.getElementById('server-time');
+
+            function setStatus(connected) {
+                if (connected) {
+                    statusDot.className = 'w-3 h-3 bg-neo-green rounded-full animate-pulse';
+                    statusText.className = 'font-mono text-sm text-neo-green font-bold uppercase';
+                    statusText.textContent = 'CONNECTED';
+                } else {
+                    statusDot.className = 'w-3 h-3 bg-red-500 rounded-full';
+                    statusText.className = 'font-mono text-sm text-red-400 font-bold uppercase';
+                    statusText.textContent = '\uc5f0\uacb0 \uc911...';
+                }
+            }
+
+            function formatDuration(ms) {
+                const s = Math.floor(ms / 1000);
+                if (s < 60) return s + '\ucd08';
+                const m = Math.floor(s / 60);
+                if (m < 60) return m + '\ubd84 ' + (s % 60) + '\ucd08';
+                const h = Math.floor(m / 60);
+                return h + '\uc2dc\uac04 ' + (m % 60) + '\ubd84';
+            }
+
+            function renderVisitors(data) {
+                visitorCount.textContent = data.count;
+                if (serverTimeEl) {
+                    const d = new Date(data.serverTime);
+                    serverTimeEl.textContent = d.toLocaleTimeString('ko-KR');
+                }
+
+                if (!data.visitors || data.visitors.length === 0) {
+                    tableBody.innerHTML = '<tr class="border-b border-white/10"><td colspan="7" class="py-8 text-center text-gray-500">\uc811\uc18d\uc790 \uc5c6\uc74c</td></tr>';
+                    return;
+                }
+
+                const now = data.serverTime || Date.now();
+                tableBody.innerHTML = data.visitors.map(function(v, i) {
+                    const isMe = v.id === myId;
+                    const rowClass = isMe ? 'border-b border-neo-green/30 bg-neo-green/5' : 'border-b border-white/10 hover:bg-white/5';
+                    const duration = formatDuration(now - v.connectedAt);
+                    const geo = v.geo || {};
+                    const ua = v.ua || {};
+                    const loc = [geo.city, geo.region, geo.country].filter(Boolean).join(', ');
+                    return '<tr class="' + rowClass + ' transition-colors">' +
+                        '<td class="py-3 px-3 text-white">' + (i + 1) + (isMe ? ' <span class="text-neo-green text-xs">(\ub098)</span>' : '') + '</td>' +
+                        '<td class="py-3 px-3 text-white font-bold">' + (v.ip || '--') + '</td>' +
+                        '<td class="py-3 px-3 text-white">' + (loc || '--') + (geo.timezone ? '<br><span class="text-gray-500 text-xs">' + geo.timezone + '</span>' : '') + '</td>' +
+                        '<td class="py-3 px-3 text-white">' + (ua.browser || '--') + ' / ' + (ua.os || '--') + '</td>' +
+                        '<td class="py-3 px-3 text-white">' + (ua.device || '--') + '</td>' +
+                        '<td class="py-3 px-3 text-gray-400 text-xs">' + (geo.isp || '--') + (geo.org ? '<br>' + geo.org : '') + '</td>' +
+                        '<td class="py-3 px-3 text-neo-green font-bold">' + duration + '</td>' +
+                    '</tr>';
+                }).join('');
+            }
+
+            function showMyInfo(data) {
+                myInfoPanel.classList.remove('hidden');
+                const geo = data.geo || {};
+                const ua = data.ua || {};
+                myInfoContent.innerHTML =
+                    '<div class="bg-black/50 p-2 border border-white/10"><span class="text-neo-green">IP:</span> ' + data.ip + '</div>' +
+                    '<div class="bg-black/50 p-2 border border-white/10"><span class="text-neo-green">\uc704\uce58:</span> ' + [geo.city, geo.country].filter(Boolean).join(', ') + '</div>' +
+                    '<div class="bg-black/50 p-2 border border-white/10"><span class="text-neo-green">\ube0c\ub77c\uc6b0\uc800:</span> ' + ua.browser + ' / ' + ua.os + '</div>';
+            }
+
+            function connect() {
+                if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
+                ws = new WebSocket(WS_URL);
+
+                ws.onopen = function() {
+                    setStatus(true);
+                    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+                };
+
+                ws.onmessage = function(e) {
+                    try {
+                        var msg = JSON.parse(e.data);
+                        if (msg.type === 'welcome') {
+                            myId = msg.id;
+                            showMyInfo(msg);
+                        } else if (msg.type === 'visitors') {
+                            renderVisitors(msg);
+                        }
+                    } catch(err) {}
+                };
+
+                ws.onclose = function() {
+                    setStatus(false);
+                    reconnectTimer = setTimeout(connect, 3000);
+                };
+
+                ws.onerror = function() {
+                    ws.close();
+                };
+            }
+
+            // Heartbeat every 25s
+            setInterval(function() {
+                if (ws && ws.readyState === 1) {
+                    ws.send(JSON.stringify({ type: 'ping' }));
+                }
+            }, 25000);
+
+            // Duration update every second
+            setInterval(function() {
+                var rows = tableBody.querySelectorAll('tr');
+                // Visitor list is rendered by server push, durations stay up-to-date enough
+            }, 1000);
+
+            connect();
+        })();
     </script>
 </body>
 
