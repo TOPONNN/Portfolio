@@ -1057,128 +1057,112 @@
             });
         });
 
-        // GitHub API Integration
-        async function fetchGitHubStats() {
+        // GitHub API Integration (cached to avoid rate limiting)
+        async function fetchAllGitHubData() {
+            const CACHE_KEY = 'gh_stats_cache';
+            const CACHE_TTL = 3600000; // 1 hour
+
+            // Try cache first
+            try {
+                const cached = JSON.parse(localStorage.getItem(CACHE_KEY));
+                if (cached && Date.now() - cached.ts < CACHE_TTL) {
+                    applyGitHubData(cached.data);
+                    return;
+                }
+            } catch (e) {}
+
             try {
                 const response = await fetch('https://api.github.com/users/TOPONNN', {
-                    headers: {
-                        'Accept': 'application/vnd.github.v3+json'
-                    }
+                    headers: { 'Accept': 'application/vnd.github.v3+json' }
                 });
 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    // If rate limited, try cache regardless of age
+                    if (response.status === 403 || response.status === 429) {
+                        try {
+                            const stale = JSON.parse(localStorage.getItem(CACHE_KEY));
+                            if (stale) { applyGitHubData(stale.data); return; }
+                        } catch (e) {}
+                    }
+                    throw new Error(`HTTP ${response.status}`);
                 }
 
                 const data = await response.json();
-
-                // Update stats (only existing elements)
-                document.getElementById('repos-count').textContent = data.public_repos || '0';
-                document.getElementById('followers-count').textContent = data.followers || '0';
-
-                // Format creation date
-                if (data.created_at) {
-                    const date = new Date(data.created_at);
-                    const formattedDate = date.toLocaleDateString('en-US', {
-                        year: 'numeric',
-                        month: 'short'
-                    });
-                    document.getElementById('created-at').textContent = formattedDate;
-                }
-
-                // Update contribution count (approximation) - only if element exists
-                const contribHeader = document.getElementById('total-contributions');
-                const contribGrid = document.getElementById('total-contributions-grid');
-                const contribValue = `${(data.public_repos * 20) + (data.followers * 5)}+`;
-
-                if (contribHeader) contribHeader.textContent = contribValue;
-                if (contribGrid) contribGrid.textContent = contribValue;
+                localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
+                applyGitHubData(data);
 
             } catch (error) {
-                console.error('Error fetching GitHub stats:', error);
-                // Set fallback values for existing elements only
+                console.error('GitHub API error:', error);
                 document.getElementById('repos-count').textContent = 'ERR';
                 document.getElementById('followers-count').textContent = 'ERR';
                 document.getElementById('created-at').textContent = 'N/A';
-                const contribElement = document.getElementById('total-contributions');
-                if (contribElement) {
-                    contribElement.textContent = 'API Error';
-                }
+                const s = document.getElementById('gh-badges-status');
+                if (s) { s.textContent = 'Failed'; s.className = 'text-red-400 text-[9px] font-mono uppercase tracking-widest'; }
             }
         }
 
-        // Fetch GitHub Badges dynamically
-        async function fetchGitHubBadges() {
-            try {
-                const username = 'TOPONNN';
-                const response = await fetch(`https://api.github.com/users/${username}`);
-                if (!response.ok) throw new Error('GH API Error');
-                const data = await response.json();
+        function applyGitHubData(data) {
+            // Stats
+            document.getElementById('repos-count').textContent = data.public_repos || '0';
+            document.getElementById('followers-count').textContent = data.followers || '0';
+            const contribValue = `${(data.public_repos * 20) + (data.followers * 5)}+`;
+            const ch = document.getElementById('total-contributions');
+            const cg = document.getElementById('total-contributions-grid');
+            if (ch) ch.textContent = contribValue;
+            if (cg) cg.textContent = contribValue;
 
-                const statusEl = document.getElementById('gh-badges-status');
-                const activeContainer = document.getElementById('gh-active-badge');
-                const historyContainer = document.getElementById('gh-history-badges');
+            // Joined date
+            if (data.created_at) {
+                const d = new Date(data.created_at);
+                document.getElementById('created-at').textContent = d.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+            }
 
-                if (statusEl) {
-                    statusEl.textContent = 'Done';
-                    statusEl.classList.remove('animate-pulse', 'text-neo-yellow');
-                    statusEl.classList.add('text-neo-green');
-                }
+            // Badges
+            const statusEl = document.getElementById('gh-badges-status');
+            const activeContainer = document.getElementById('gh-active-badge');
+            const historyContainer = document.getElementById('gh-history-badges');
 
-                // Simulate "Highest Rank" based on follower/repo logic
-                if (activeContainer) {
-                    let rankTitle = 'Open Sourcer';
-                    let iconClass = 'ri-git-repository-fill';
-                    if (data.followers > 20) {
-                        rankTitle = 'Star Dev';
-                        iconClass = 'ri-star-smile-fill';
-                    }
+            if (statusEl) {
+                statusEl.textContent = 'Done';
+                statusEl.classList.remove('animate-pulse', 'text-neo-yellow');
+                statusEl.classList.add('text-neo-green');
+            }
 
-                    activeContainer.innerHTML = `
-                        <div class="relative w-12 h-12 mb-2 group-hover:scale-110 transition-transform">
-                            <div class="w-full h-full rounded-full border-2 border-neo-green flex items-center justify-center bg-neo-green/10">
-                                <i class="${iconClass} text-neo-green text-2xl drop-shadow-[0_0_8px_rgba(51,255,87,0.5)]"></i>
-                            </div>
+            if (activeContainer) {
+                let rankTitle = 'Open Sourcer';
+                let iconClass = 'ri-git-repository-fill';
+                if (data.followers > 20) { rankTitle = 'Star Dev'; iconClass = 'ri-star-smile-fill'; }
+                activeContainer.innerHTML = `
+                    <div class="relative w-12 h-12 mb-2 group-hover:scale-110 transition-transform">
+                        <div class="w-full h-full rounded-full border-2 border-neo-green flex items-center justify-center bg-neo-green/10">
+                            <i class="${iconClass} text-neo-green text-2xl drop-shadow-[0_0_8px_rgba(51,255,87,0.5)]"></i>
                         </div>
-                        <span class="text-[10px] font-mono text-white text-center leading-tight max-w-[90px] truncate" title="${rankTitle}">${rankTitle}</span>
-                    `;
-                }
+                    </div>
+                    <span class="text-[10px] font-mono text-white text-center leading-tight max-w-[90px] truncate" title="${rankTitle}">${rankTitle}</span>
+                `;
+            }
 
-                // Simulate "History Awards" 
-                if (historyContainer) {
-                    const awards = [];
-                    if (data.public_repos >= 10) awards.push({ name: "10+ Repos", icon: "ri-folder-open-fill" });
-                    if (data.public_repos >= 50) awards.push({ name: "50+ Repos", icon: "ri-folder-add-fill" });
-                    if (data.followers > 10) awards.push({ name: "Popular", icon: "ri-user-heart-fill" });
+            if (historyContainer) {
+                const awards = [];
+                if (data.public_repos >= 10) awards.push({ name: '10+ Repos', icon: 'ri-folder-open-fill' });
+                if (data.public_repos >= 50) awards.push({ name: '50+ Repos', icon: 'ri-folder-add-fill' });
+                if (data.followers > 10) awards.push({ name: 'Popular', icon: 'ri-user-heart-fill' });
+                if (awards.length === 0) awards.push({ name: 'Contributor', icon: 'ri-medal-line' });
 
-                    // Fallback if no awards
-                    if (awards.length === 0) awards.push({ name: "Contributor", icon: "ri-medal-line" });
-
-                    // Duplicate the awards array items to create a seamless infinite scroll loop
-                    const repeatedAwards = [...awards, ...awards, ...awards, ...awards];
-
-                    historyContainer.innerHTML = repeatedAwards.map(badge => `
-                        <div class="min-w-[70px] flex flex-col items-center group/badge">
-                            <div class="w-10 h-10 mb-2 relative group-hover/badge:-translate-y-1 transition-transform flex items-center justify-center border-2 border-white/20 rounded-full bg-white/5 shadow-[2px_2px_0_rgba(51,255,87,0.3)] hover:border-neo-green hover:shadow-[4px_4px_0_rgba(51,255,87,1)] cursor-pointer">
-                                <i class="${badge.icon} text-neo-green text-xl drop-shadow-[2px_2px_0_rgba(0,0,0,1)]"></i>
-                            </div>
-                            <span class="text-[9px] font-mono text-gray-300 font-bold text-center w-full truncate px-1" title="${badge.name}">${badge.name}</span>
+                const repeated = [...awards, ...awards, ...awards, ...awards];
+                historyContainer.innerHTML = repeated.map(badge => `
+                    <div class="min-w-[70px] flex flex-col items-center group/badge">
+                        <div class="w-10 h-10 mb-2 relative group-hover/badge:-translate-y-1 transition-transform flex items-center justify-center border-2 border-white/20 rounded-full bg-white/5 shadow-[2px_2px_0_rgba(51,255,87,0.3)] hover:border-neo-green hover:shadow-[4px_4px_0_rgba(51,255,87,1)] cursor-pointer">
+                            <i class="${badge.icon} text-neo-green text-xl drop-shadow-[2px_2px_0_rgba(0,0,0,1)]"></i>
                         </div>
-                    `).join('');
-                }
-            } catch (error) {
-                console.error('Error fetching GH badges:', error);
-                const statusEl = document.getElementById('gh-badges-status');
-                if (statusEl) {
-                    statusEl.textContent = 'Failed';
-                    statusEl.className = 'text-neo-red text-[9px] font-mono uppercase tracking-widest';
-                }
+                        <span class="text-[9px] font-mono text-gray-300 font-bold text-center w-full truncate px-1" title="${badge.name}">${badge.name}</span>
+                    </div>
+                `).join('');
             }
         }
 
-        // Call on page load
-        fetchGitHubStats();
-        fetchGitHubBadges();
+        // Single API call on load
+        fetchAllGitHubData();
 
         // Scroll Reveal Logic
         const revealElements = document.querySelectorAll('.reveal');

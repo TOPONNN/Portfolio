@@ -5,12 +5,34 @@ const PORT = 3099;
 const visitors = new Map(); // id -> visitor info
 let visitorCounter = 0;
 
-// Fetch geolocation from ip-api.com (free, no key needed, 45 req/min)
+// Fetch geolocation — ipinfo.io primary (accurate for KR), ip-api.com fallback
 async function getGeoInfo(ip) {
   // Skip private/local IPs
   if (!ip || ip === '127.0.0.1' || ip === '::1' || ip.startsWith('10.') || ip.startsWith('172.') || ip.startsWith('192.168.')) {
     return { country: 'Local', city: 'Server', region: '', isp: 'Local Network', lat: 0, lon: 0, timezone: '', org: '' };
   }
+  // Try ipinfo.io first (better accuracy for Korean IPs)
+  try {
+    const resp = await fetch(`https://ipinfo.io/${ip}/json`);
+    const data = await resp.json();
+    if (data && data.country && !data.bogon) {
+      const [lat, lon] = (data.loc || '0,0').split(',').map(Number);
+      const orgParts = (data.org || '').replace(/^AS\d+\s*/, '');
+      return {
+        country: regionNames(data.country),
+        city: data.city || 'Unknown',
+        region: data.region || '',
+        isp: orgParts || '',
+        lat, lon,
+        timezone: data.timezone || '',
+        org: orgParts || '',
+        as: (data.org || '').match(/^AS\d+/)?.[0] || ''
+      };
+    }
+  } catch (e) {
+    console.error('ipinfo.io failed, trying fallback:', e.message);
+  }
+  // Fallback to ip-api.com
   try {
     const resp = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city,lat,lon,timezone,isp,org,as,query`);
     const data = await resp.json();
@@ -31,6 +53,12 @@ async function getGeoInfo(ip) {
     console.error('Geo lookup failed:', e.message);
   }
   return { country: 'Unknown', city: 'Unknown', region: '', isp: '', lat: 0, lon: 0, timezone: '', org: '' };
+}
+
+// Convert country code to full name
+function regionNames(code) {
+  const names = { KR: 'South Korea', US: 'United States', JP: 'Japan', CN: 'China', GB: 'United Kingdom', DE: 'Germany', FR: 'France', CA: 'Canada', AU: 'Australia', SG: 'Singapore' };
+  return names[code] || code;
 }
 
 // Parse User-Agent into readable device info
