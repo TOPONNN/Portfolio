@@ -8,12 +8,3 @@ services:
       - "8445:443"
     volumes:
       - /etc/letsencrypt:/etc/letsencrypt:ro
-    depends_on:
-      - tracker
-
-  tracker:
-    build: ./tracker
-    container_name: portfolio-tracker
-    restart: unless-stopped
-    expose:
-      - "3099"
