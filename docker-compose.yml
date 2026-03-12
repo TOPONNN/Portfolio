@@ -1,0 +1,10 @@
+services:
+  portfolio:
+    build: .
+    container_name: portfolio-frontend
+    restart: unless-stopped
+    ports:
+      - "8882:80"
+      - "8445:443"
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt:ro
